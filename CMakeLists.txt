@@ -1,5 +1,5 @@
-# Copyright (c) 2018, The Loki Project
-# Copyright (c) 2014-2019, The Monero Project
+# Copyright (c) 2018, The Beldex Project
+# Copyright (c) 2014-2018, The Monero Project
 #
 # All rights reserved.
 #
@@ -40,10 +40,23 @@ if (IOS)
     INCLUDE(CmakeLists_IOS.txt)
 endif()
 
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 2.8.7)
 message(STATUS "CMake version ${CMAKE_VERSION}")
 
-project(loki)
+project(beldex)
+
+function (die msg)
+  if (NOT WIN32)
+    string(ASCII 27 Esc)
+    set(ColourReset "${Esc}[m")
+    set(BoldRed     "${Esc}[1;31m")
+  else ()
+    set(ColourReset "")
+    set(BoldRed     "")
+  endif ()
+
+  message(FATAL_ERROR "${BoldRed}${msg}${ColourReset}")
+endfunction ()
 
 function (add_c_flag_if_supported flag var)
   string(REPLACE "-" "_" supported ${flag}_c)
@@ -86,20 +99,6 @@ function (add_definition_if_library_exists library function header var)
   endif()
 endfunction()
 
-# Properly links a target to a list of library names by finding the given libraries.  Takes:
-# - a target
-# - a linktype (e.g. INTERFACE, PUBLIC, PRIVATE)
-# - a library search path (or "" for defaults)
-# - any number of library names
-function(link_dep_libs target linktype libdirs)
-  foreach(lib ${ARGN})
-    find_library(link_lib-${lib} NAMES ${lib} PATHS ${libdirs})
-    if(link_lib-${lib})
-      target_link_libraries(${target} ${linktype} ${link_lib-${lib}})
-    endif()
-  endforeach()
-endfunction()
-
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
   message(STATUS "Setting default build type: ${CMAKE_BUILD_TYPE}")
@@ -118,15 +117,10 @@ set(CMAKE_FIND_FRAMEWORK "LAST")
 # when ARCH is not set to an explicit identifier, cmake's builtin is used
 # to identify the target architecture, to direct logic in this cmake script.
 # Since ARCH is a cached variable, it will not be set on first cmake invocation.
-if (NOT ARCH_ID)
 if (NOT ARCH OR ARCH STREQUAL "" OR ARCH STREQUAL "native" OR ARCH STREQUAL "default")
-  if(CMAKE_SYSTEM_PROCESSOR STREQUAL "")
-    set(CMAKE_SYSTEM_PROCESSOR ${CMAKE_HOST_SYSTEM_PROCESSOR})
-  endif()
   set(ARCH_ID "${CMAKE_SYSTEM_PROCESSOR}")
 else()
   set(ARCH_ID "${ARCH}")
-endif()
 endif()
 string(TOLOWER "${ARCH_ID}" ARM_ID)
 string(SUBSTRING "${ARM_ID}" 0 3 ARM_TEST)
@@ -175,10 +169,6 @@ else()
   set(OPT_FLAGS_RELEASE "-Ofast")
 endif()
 
-set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG ${OPT_FLAGS_RELEASE}")
-set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG ${OPT_FLAGS_RELEASE}")
-
-
 # BUILD_TAG is used to select the build type to check for a new version
 if(BUILD_TAG)
   message(STATUS "Building build tag ${BUILD_TAG}")
@@ -197,18 +187,8 @@ if(NOT MANUAL_SUBMODULES)
       if (upToDate)
         message(STATUS "Submodule '${relative_path}' is up-to-date")
       else()
-        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date. Please update with\ngit submodule update --init --recursive\nor run cmake with -DMANUAL_SUBMODULES=1")
+        message(FATAL_ERROR "Submodule '${relative_path}' is not up-to-date. Please update with\ngit submodule update --init --force ${relative_path}\nor run cmake with -DMANUAL_SUBMODULES=1")
       endif()
-
-      # Extra arguments check nested submodules
-      foreach(submod ${ARGN})
-        execute_process(COMMAND git rev-parse "HEAD" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path}/${submod} OUTPUT_VARIABLE localHead)
-        execute_process(COMMAND git rev-parse "HEAD:${submod}" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${relative_path} OUTPUT_VARIABLE checkedHead)
-        string(COMPARE EQUAL "${localHead}" "${checkedHead}" upToDate)
-        if (NOT upToDate)
-          message(FATAL_ERROR "Nested submodule '${relative_path}/${submod}' is not up-to-date. Please update with\ngit submodule update --init --recursive\nor run cmake with -DMANUAL_SUBMODULES=1")
-        endif()
-      endforeach()
     endfunction ()
     
     message(STATUS "Checking submodules")
@@ -216,13 +196,21 @@ if(NOT MANUAL_SUBMODULES)
     check_submodule(external/unbound)
     check_submodule(external/rapidjson)
     check_submodule(external/trezor-common)
-    # check_submodule(external/randomx)
-    # check_submodule(external/loki-mq mapbox-variant cppzmq)
   endif()
 endif()
 
+set(CMAKE_C_FLAGS_RELEASE "-DNDEBUG ${OPT_FLAGS_RELEASE}")
+set(CMAKE_CXX_FLAGS_RELEASE "-DNDEBUG ${OPT_FLAGS_RELEASE}")
+
 # set this to 0 if per-block checkpoint needs to be disabled
-option(PER_BLOCK_CHECKPOINT "Enables per-block checkpointing" ON)
+set(PER_BLOCK_CHECKPOINT 1)
+
+if(PER_BLOCK_CHECKPOINT)
+  add_definitions("-DPER_BLOCK_CHECKPOINT")
+  set(Blocks "blocks")
+else()
+  set(Blocks "")
+endif()
 
 list(INSERT CMAKE_MODULE_PATH 0
   "${CMAKE_SOURCE_DIR}/cmake")
@@ -258,9 +246,6 @@ enable_testing()
 
 option(BUILD_DOCUMENTATION "Build the Doxygen documentation." ON)
 option(BUILD_TESTS "Build tests." OFF)
-if (BUILD_TESTS)
-  add_definitions(-DUNIT_TEST)
-endif()
 
 # Check whether we're on a 32-bit or 64-bit system
 if(CMAKE_SIZEOF_VOID_P EQUAL "8")
@@ -300,7 +285,7 @@ endif()
 # elseif(CMAKE_SYSTEM_NAME MATCHES ".*BSDI.*")
 #   set(BSDI TRUE)
 
-include_directories(external/rapidjson/include src contrib/epee/include external)
+include_directories(external/rapidjson/include external/easylogging++ src contrib/epee/include external)
 
 if(APPLE)
   include_directories(SYSTEM /usr/include/malloc)
@@ -314,8 +299,19 @@ if(MSVC OR MINGW)
 else()
   set(DEFAULT_STATIC false)
 endif()
-option(STATIC "Try to link external libraries statically, where possible" ${DEFAULT_STATIC})
-option(BUILD_SHARED_LIBS "Build shared internal libraries" OFF)
+option(STATIC "Link libraries statically" ${DEFAULT_STATIC})
+
+# This is a CMake built-in switch that concerns internal libraries
+if (NOT DEFINED BUILD_SHARED_LIBS AND NOT STATIC AND CMAKE_BUILD_TYPE_LOWER STREQUAL "debug")
+  set(BUILD_SHARED_LIBS ON)
+endif()
+
+if (BUILD_SHARED_LIBS)
+  message(STATUS "Building internal libraries with position independent code")
+  add_definitions("-DBUILD_SHARED_LIBS")
+else()
+  message(STATUS "Building internal libraries as static")
+endif()
 set(PIC_FLAG "-fPIC")
 
 if(MINGW)
@@ -362,18 +358,98 @@ else()
   message(STATUS "Could not find DATABASE in env (not required unless you want to change database type from default: ${DATABASE})")
 endif()
 
-if (DATABASE STREQUAL "lmdb")
-  message(STATUS "Using LMDB as default DB type")
-  set(BLOCKCHAIN_DB "lmdb")
-else()
-  message(FATAL_ERROR "Invalid database type: ${DATABASE}")
+set(BERKELEY_DB_OVERRIDE 0)
+if (DEFINED ENV{BERKELEY_DB})
+  set(BERKELEY_DB_OVERRIDE 1)
+  set(BERKELEY_DB $ENV{BERKELEY_DB})
+elseif()
+  set(BERKELEY_DB 0)
 endif()
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads)
+if (DATABASE STREQUAL "lmdb")
+  message(STATUS "Using LMDB as default DB type")
+  set(BLOCKCHAIN_DB DB_LMDB)
+  add_definitions("-DDEFAULT_DB_TYPE=\"lmdb\"")
+elseif (DATABASE STREQUAL "berkeleydb")
+  find_package(BerkeleyDB)
+  if(NOT BERKELEY_DB)
+      die("Found BerkeleyDB includes, but could not find BerkeleyDB library. Please make sure you have installed libdb and libdb-dev / libdb++-dev or the equivalent.")
+  else()
+    message(STATUS "Found BerkeleyDB include (db.h) in ${BERKELEY_DB_INCLUDE_DIR}")
+    if(BERKELEY_DB_LIBRARIES)
+      message(STATUS "Found BerkeleyDB shared library")
+      set(BDB_STATIC false CACHE BOOL "BDB Static flag")
+      set(BDB_INCLUDE ${BERKELEY_DB_INCLUDE_DIR} CACHE STRING "BDB include path")
+      set(BDB_LIBRARY ${BERKELEY_DB_LIBRARIES} CACHE STRING "BDB library name")
+      set(BDB_LIBRARY_DIRS "" CACHE STRING "BDB Library dirs")
+      set(BERKELEY_DB 1)
+    else()
+      die("Found BerkeleyDB includes, but could not find BerkeleyDB library. Please make sure you have installed libdb and libdb-dev / libdb++-dev or the equivalent.")
+    endif()
+  endif()
+
+  message(STATUS "Using Berkeley DB as default DB type")
+  add_definitions("-DDEFAULT_DB_TYPE=\"berkeley\"")
+else()
+  die("Invalid database type: ${DATABASE}")
+endif()
+
+if(BERKELEY_DB)
+  add_definitions("-DBERKELEY_DB")
+endif()
+
+add_definitions("-DBLOCKCHAIN_DB=${BLOCKCHAIN_DB}")
+
+# Can't install hook in static build on OSX, because OSX linker does not support --wrap
+# On ARM, having libunwind package (with .so's only) installed breaks static link.
+# When possible, avoid stack tracing using libunwind in favor of using easylogging++.
+if (APPLE)
+  set(DEFAULT_STACK_TRACE OFF)
+  set(LIBUNWIND_LIBRARIES "")
+elseif (DEPENDS AND NOT LINUX)
+  set(DEFAULT_STACK_TRACE OFF)
+  set(LIBUNWIND_LIBRARIES "")
+elseif(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT MINGW)
+  set(DEFAULT_STACK_TRACE ON)
+  set(STACK_TRACE_LIB "easylogging++") # for diag output only
+  set(LIBUNWIND_LIBRARIES "")
+elseif (ARM AND STATIC)
+  set(DEFAULT_STACK_TRACE OFF)
+  set(LIBUNWIND_LIBRARIES "")
+else()
+  find_package(Libunwind)
+  if(LIBUNWIND_FOUND)
+    set(DEFAULT_STACK_TRACE ON)
+    set(STACK_TRACE_LIB "libunwind") # for diag output only
+  else()
+    set(DEFAULT_STACK_TRACE OFF)
+    set(LIBUNWIND_LIBRARIES "")
+  endif()
+endif()
+
+option(STACK_TRACE "Install a hook that dumps stack on exception" ${DEFAULT_STACK_TRACE})
+
+if(STACK_TRACE)
+  message(STATUS "Stack trace on exception enabled (using ${STACK_TRACE_LIB})")
+else()
+  message(STATUS "Stack trace on exception disabled")
+endif()
+
+if (UNIX AND NOT APPLE)
+  # Note that at the time of this writing the -Wstrict-prototypes flag added below will make this fail
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads)
+  add_c_flag_if_supported(-pthread CMAKE_C_FLAGS)
+  add_cxx_flag_if_supported(-pthread CMAKE_CXX_FLAGS)
+endif()
+
+# Handle OpenSSL, used for sha256sum on binary updates and light wallet ssl http
+if (CMAKE_SYSTEM_NAME MATCHES "(SunOS|Solaris)")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthreads")
+endif ()
 
 if (APPLE AND NOT IOS)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=x86-64 -fvisibility=default -std=c++14")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=x86-64 -fvisibility=default")
   if (NOT OpenSSL_DIR)
       EXECUTE_PROCESS(COMMAND brew --prefix openssl
         OUTPUT_VARIABLE OPENSSL_ROOT_DIR
@@ -384,15 +460,20 @@ endif()
 
 find_package(OpenSSL REQUIRED)
 message(STATUS "Using OpenSSL include dir at ${OPENSSL_INCLUDE_DIR}")
-
-if(MINGW)
-  # OpenSSL doesn't seem to properly set up its dependencies on Windows, leading to linking errors
-  target_link_libraries(OpenSSL::Crypto INTERFACE ws2_32)
+include_directories(${OPENSSL_INCLUDE_DIR})
+if(STATIC AND NOT IOS)
+  if(UNIX)
+    set(OPENSSL_LIBRARIES "${OPENSSL_LIBRARIES};${CMAKE_DL_LIBS};${CMAKE_THREAD_LIBS_INIT}")
+  endif()
 endif()
+
+find_package(HIDAPI)
 
 add_definition_if_library_exists(c memset_s "string.h" HAVE_MEMSET_S)
 add_definition_if_library_exists(c explicit_bzero "strings.h" HAVE_EXPLICIT_BZERO)
 add_definition_if_function_found(strptime HAVE_STRPTIME)
+
+add_definitions(-DAUTO_INITIALIZE_EASYLOGGINGPP)
 
 # Generate header for embedded translations
 # Generate header for embedded translations, use target toolchain if depends, otherwise use the
@@ -404,38 +485,38 @@ ExternalProject_Add(generate_translations_header
   STAMP_DIR ${LRELEASE_PATH}
   CMAKE_ARGS -DLRELEASE_PATH=${LRELEASE_PATH}
   INSTALL_COMMAND cmake -E echo "")
-
-if(POLICY CMP0079)
-  cmake_policy(SET CMP0079 NEW)
-endif()
-add_library(libunbound INTERFACE)
-add_library(miniupnpc INTERFACE)
-
-# Allow -D DOWNLOAD_SODIUM=FORCE to download without even checking for a local libsodium
-option(DOWNLOAD_SODIUM "Allow libsodium to be downloaded and built locally if not found on the system" OFF)
-if(NOT DOWNLOAD_SODIUM STREQUAL "FORCE")
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(SODIUM libsodium>=1.0.9 IMPORTED_TARGET)
-endif()
-
-add_library(sodium INTERFACE)
-if(SODIUM_FOUND AND NOT DOWNLOAD_SODIUM STREQUAL "FORCE")
-  target_link_libraries(sodium INTERFACE PkgConfig::SODIUM)
-else()
-  if(NOT DOWNLOAD_SODIUM)
-    message(FATAL_ERROR "Could not find libsodium >= 1.0.9; either install it on your system or use -DDOWNLOAD_SODIUM=ON to download and build an internal copy")
-  endif()
-  message(STATUS "Sodium >= 1.0.9 not found, but DOWNLOAD_SODIUM specified, so downloading it")
-  include(DownloadLibSodium)
-  target_link_libraries(sodium INTERFACE sodium_vendor)
-endif()
-
-export(TARGETS sodium NAMESPACE sodium:: FILE sodium-exports.cmake)
-install(TARGETS sodium EXPORT sodiumConfig DESTINATION ${CMAKE_INSTALL_LIBDIR})
-
+include_directories("${CMAKE_CURRENT_BINARY_DIR}/translations")
 add_subdirectory(external)
 
-target_compile_definitions(easylogging PRIVATE AUTO_INITIALIZE_EASYLOGGINGPP)
+# Final setup for libunbound
+include_directories(${UNBOUND_INCLUDE})
+link_directories(${UNBOUND_LIBRARY_DIRS})
+
+# Final setup for easylogging++
+include_directories(${EASYLOGGING_INCLUDE})
+link_directories(${EASYLOGGING_LIBRARY_DIRS})
+
+# Final setup for liblmdb
+include_directories(${LMDB_INCLUDE})
+
+# Final setup for Berkeley DB
+if (BERKELEY_DB)
+  include_directories(${BDB_INCLUDE})
+endif()
+
+# Final setup for libunwind
+include_directories(${LIBUNWIND_INCLUDE})
+link_directories(${LIBUNWIND_LIBRARY_DIRS})
+
+# Final setup for hid
+if (HIDAPI_FOUND) 
+  message(STATUS "Using HIDAPI include dir at ${HIDAPI_INCLUDE_DIR}")
+  add_definitions(-DHAVE_HIDAPI)
+  include_directories(${HIDAPI_INCLUDE_DIR})
+  link_directories(${LIBHIDAPI_LIBRARY_DIRS})
+else (HIDAPI_FOUND)
+  message(STATUS "Could not find HIDAPI")
+endif()
 
 # Trezor support check
 include(CheckTrezor)
@@ -468,26 +549,8 @@ else()
     message(STATUS "IOS: Changing arch from arm64 to armv8")
     set(ARCH_FLAG "-march=armv8")
   elseif(ANDROID AND ARCH STREQUAL "armv8-a")
-
-    # Android Hack: Ideally we would keep the hacks out of cmake and in
-    # build-all-arch.sh, but setting armv8-a+crypto too early messes with the
-    # randomx build that needs arch to be exactly "armv8-a" to include and
-    # compile with jit_compiler_a64.* files.
-
-    # This is a hack because ideally we don't want to change target
-    # architectures on behalf of users if they set a architecture explicitly.
-    # Even if the architecture doesn't support it our PoW files don't properly
-    # use preprocessors to avoid linking against +crypto extensions like
-    # vaeseq_u8.
-
-    # Instead they want to link to the functions but at run-time query the CPU
-    # feature flags and use the software implementation otherwise.
-
     message(STATUS "Android: Changing arch from armv8")
     set(ARCH_FLAG "-march=armv8+crypto")
-  elseif(IOS AND ARCH STREQUAL "x86_64")
-    message(STATUS "IOS: Changing arch from x86_64 to x86-64")
-    set(ARCH_FLAG "-march=x86-64")
   else()
     set(ARCH_FLAG "-march=${ARCH}")
     if(ARCH STREQUAL "native")
@@ -503,17 +566,41 @@ else()
     endif()
   endif()
 
+  option(NO_AES "Explicitly disable AES support" ${NO_AES})
+
+  if(NO_AES)
+    message(STATUS "AES support explicitly disabled")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DNO_AES")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DNO_AES")
+  elseif(NOT ARM AND NOT PPC64LE AND NOT PPC64 AND NOT PPC AND NOT S390X)
+    message(STATUS "AES support enabled")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -maes")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -maes")
+  elseif(PPC64LE OR PPC64 OR PPC)
+    message(STATUS "AES support not available on POWER")
+  elseif(S390X)
+    message(STATUS "AES support not available on s390x")
+  elseif(ARM6)
+    message(STATUS "AES support not available on ARMv6")
+  elseif(ARM7)
+    message(STATUS "AES support not available on ARMv7")
+  elseif(ARM8)
+    CHECK_CXX_ACCEPTS_FLAG("-march=${ARCH}+crypto" ARCH_PLUS_CRYPTO)
+    if(ARCH_PLUS_CRYPTO)
+      message(STATUS "Crypto extensions enabled for ARMv8")
+      set(ARCH_FLAG "-march=${ARCH}+crypto")
+    else()
+      message(STATUS "Crypto extensions unavailable on your ARMv8 device")
+    endif()
+  else()
+    message(STATUS "AES support disabled")
+  endif()
+
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ARCH_FLAG}")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ARCH_FLAG}")
 
-  set(WARNINGS "-Wall -Wextra -Wpointer-arith -Wundef -Wvla -Wwrite-strings -Wno-error=extra -Wno-error=deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-error=unused-variable -Wno-error=undef -Wno-error=uninitialized -Wno-error=unknown-pragmas -Wno-error=unused-function")
-
-  option(WARNINGS_AS_ERRORS "Enable warning as errors" OFF)
-  if(NOT MINGW AND WARNINGS_AS_ERRORS)
-    set(WARNINGS_AS_ERRORS_FLAG "-Werror")
-  endif()
-
-  if(CMAKE_C_COMPILER_ID STREQUAL "Clang" OR CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+  set(WARNINGS "-Wall -Wextra -Wpointer-arith -Wundef -Wvla -Wwrite-strings -Wno-error=extra -Wno-error=deprecated-declarations -Wno-unused-parameter -Wno-unused-variable -Wno-error=unused-variable -Wno-error=undef -Wno-error=uninitialized")
+  if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
     if(ARM)
       set(WARNINGS "${WARNINGS} -Wno-error=inline-asm")
     endif()
@@ -541,7 +628,7 @@ else()
     set(STATIC_ASSERT_FLAG "-Dstatic_assert=_Static_assert")
   endif()
 
-  try_compile(STATIC_ASSERT_CPP_RES "${CMAKE_CURRENT_BINARY_DIR}/static-assert" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test-static-assert.cpp" COMPILE_DEFINITIONS "-std=c++14")
+  try_compile(STATIC_ASSERT_CPP_RES "${CMAKE_CURRENT_BINARY_DIR}/static-assert" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test-static-assert.cpp" COMPILE_DEFINITIONS "-std=c++11")
   if(STATIC_ASSERT_CPP_RES)
     set(STATIC_ASSERT_CPP_FLAG "")
   else()
@@ -563,7 +650,6 @@ else()
   # if those don't work for your compiler, single it out where appropriate
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set(C_SECURITY_FLAGS "${C_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
-    set(C_SECURITY_FLAGS "${C_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
     set(CXX_SECURITY_FLAGS "${CXX_SECURITY_FLAGS} -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=1")
   endif()
 
@@ -574,30 +660,23 @@ else()
   add_cxx_flag_if_supported(-Wformat-security CXX_SECURITY_FLAGS)
 
   # -fstack-protector
-  add_c_flag_if_supported(-fstack-protector C_SECURITY_FLAGS)
-  add_cxx_flag_if_supported(-fstack-protector CXX_SECURITY_FLAGS)
-  add_c_flag_if_supported(-fstack-protector-strong C_SECURITY_FLAGS)
-  add_cxx_flag_if_supported(-fstack-protector-strong CXX_SECURITY_FLAGS)
-
-  # -fno-stack-check
-  if (IOS)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-stack-check")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-stack-check")
+  if (NOT WIN32)
+    add_c_flag_if_supported(-fstack-protector C_SECURITY_FLAGS)
+    add_cxx_flag_if_supported(-fstack-protector CXX_SECURITY_FLAGS)
+    add_c_flag_if_supported(-fstack-protector-strong C_SECURITY_FLAGS)
+    add_cxx_flag_if_supported(-fstack-protector-strong CXX_SECURITY_FLAGS)
   endif()
 
   # New in GCC 8.2
-  if (NOT WIN32 AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  if (NOT WIN32)
     add_c_flag_if_supported(-fcf-protection=full C_SECURITY_FLAGS)
     add_cxx_flag_if_supported(-fcf-protection=full CXX_SECURITY_FLAGS)
     add_c_flag_if_supported(-fstack-clash-protection C_SECURITY_FLAGS)
     add_cxx_flag_if_supported(-fstack-clash-protection CXX_SECURITY_FLAGS)
   endif()
 
-  # Removed in GCC 9.1 (or before ?), but still accepted, so spams the output
-  if (NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 9.1))
-    add_c_flag_if_supported(-mmitigate-rop C_SECURITY_FLAGS)
-    add_cxx_flag_if_supported(-mmitigate-rop CXX_SECURITY_FLAGS)
-  endif()
+  add_c_flag_if_supported(-mmitigate-rop C_SECURITY_FLAGS)
+  add_cxx_flag_if_supported(-mmitigate-rop CXX_SECURITY_FLAGS)
 
   # linker
   if (NOT WIN32)
@@ -616,6 +695,7 @@ else()
   endif()
 
   if(BACKCOMPAT)
+      add_definitions(-DFDELT_TYPE=long\ int)
       add_linker_flag_if_supported(-Wl,--wrap=__divmoddi4 LD_BACKCOMPAT_FLAGS)
       add_linker_flag_if_supported(-Wl,--wrap=glob LD_BACKCOMPAT_FLAGS)
       message(STATUS "Using Lib C back compat flags: ${LD_BACKCOMPAT_FLAGS}")
@@ -632,7 +712,7 @@ else()
   message(STATUS "Using linker security hardening flags: ${LD_SECURITY_FLAGS}")
 
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c11 -D_GNU_SOURCE ${MINGW_FLAG} ${STATIC_ASSERT_FLAG} ${WARNINGS} ${C_WARNINGS} ${COVERAGE_FLAGS} ${PIC_FLAG} ${C_SECURITY_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -D_GNU_SOURCE ${MINGW_FLAG} ${STATIC_ASSERT_CPP_FLAG} ${WARNINGS} ${CXX_WARNINGS} ${COVERAGE_FLAGS} ${PIC_FLAG} ${CXX_SECURITY_FLAGS}")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -D_GNU_SOURCE ${MINGW_FLAG} ${STATIC_ASSERT_CPP_FLAG} ${WARNINGS} ${CXX_WARNINGS} ${COVERAGE_FLAGS} ${PIC_FLAG} ${CXX_SECURITY_FLAGS}")
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${LD_SECURITY_FLAGS} ${LD_BACKCOMPAT_FLAGS}")
 
   # With GCC 6.1.1 the compiled binary malfunctions due to aliasing. Until that
@@ -802,23 +882,16 @@ set(OLD_LIB_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
 if(STATIC)
   if(MINGW)
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
-    set(Boost_NO_BOOST_CMAKE ON)
   endif()
 
   set(Boost_USE_STATIC_LIBS ON)
   set(Boost_USE_STATIC_RUNTIME ON)
 endif()
-set(Boost_USE_MULTITHREADED TRUE) # Needed for macOS, at least, and won't hurt elsewhere
-
-if (WIN32)
-  find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options locale)
-else()
-  find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options)
-endif()
+find_package(Boost 1.58 QUIET REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options locale)
 
 set(CMAKE_FIND_LIBRARY_SUFFIXES ${OLD_LIB_SUFFIXES})
 if(NOT Boost_FOUND)
-  message(FATAL_ERROR "Could not find Boost libraries, please make sure you have installed Boost or libboost-all-dev (>=1.58) or the equivalent")
+  die("Could not find Boost libraries, please make sure you have installed Boost or libboost-all-dev (1.58) or the equivalent")
 elseif(Boost_FOUND)
   message(STATUS "Found Boost Version: ${Boost_VERSION}")
   if (Boost_VERSION VERSION_LESS 10 AND Boost_VERSION VERSION_LESS 1.62.0 AND NOT (OPENSSL_VERSION VERSION_LESS 1.1))
@@ -828,109 +901,102 @@ elseif(Boost_FOUND)
     set(BOOST_BEFORE_1_62 true)
   endif()
   if (BOOST_BEFORE_1_62)
-      message(FATAL_ERROR "Boost ${Boost_VERSION} (older than 1.62) is too old to link with OpenSSL ${OPENSSL_VERSION} (1.1 or newer) found at ${OPENSSL_INCLUDE_DIR} and ${OPENSSL_LIBRARIES}. "
+      message(FATAL_ERROR "Boost older than 1.62 is too old to link with OpenSSL 1.1 or newer. "
                           "Update Boost or install OpenSSL 1.0 and set path to it when running cmake: "
-                          "cmake -DOPENSSL_ROOT_DIR='/usr/include/openssl-1.0'")
+                          "cmake -DOPENSSL_ROOT_DIR='/usr/include/openssl-1.0;/usr/lib/openssl-1.0'")
   endif()
 endif()
 
-# Interface target for random extra system libraries that we need to link everything against
-add_library(extra INTERFACE)
-target_link_libraries(extra INTERFACE ${CMAKE_DL_LIBS})
-target_link_libraries(extra INTERFACE Boost::boost)
-target_link_libraries(extra INTERFACE Threads::Threads)
-
-if(APPLE AND BUILD_SHARED_LIBS)
-  # Don't crap out on circular dependencies between internal libs on macOS when doing a shared build
-  target_link_libraries(extra INTERFACE "-undefined dynamic_lookup")
-endif()
-
-# Interface target for ICU libs (if needed)
-add_library(icu INTERFACE)
-
-
+include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 if(MINGW)
   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wa,-mbig-obj")
-  target_link_libraries(extra INTERFACE mswsock ws2_32 iphlpapi crypt32 bcrypt)
+  set(EXTRA_LIBRARIES mswsock;ws2_32;iphlpapi;crypt32;bcrypt)
   if(DEPENDS)
-    link_dep_libs(icu INTERFACE "" icuio icui18n icuuc icudata icutu iconv)
+    set(ICU_LIBRARIES icuio icui18n icuuc icudata icutu iconv)
   else()
-    link_dep_libs(icu INTERFACE "" icuio icuin icuuc icudt icutu iconv)
+    set(ICU_LIBRARIES icuio icuin icuuc icudt icutu iconv)
   endif()
+elseif(APPLE OR OPENBSD OR ANDROID)
+  set(EXTRA_LIBRARIES "")
 elseif(FREEBSD)
-  target_link_libraries(extra INTERFACE execinfo)
+  set(EXTRA_LIBRARIES execinfo)
 elseif(DRAGONFLY)
   find_library(COMPAT compat)
-  target_link_libraries(extra INTERFACE ${COMPAT})
+  set(EXTRA_LIBRARIES execinfo ${COMPAT})
 elseif(CMAKE_SYSTEM_NAME MATCHES "(SunOS|Solaris)")
-  target_link_libraries(extra INTERFACE socket nsl resolv)
-elseif(APPLE)
-  if(DEPENDS)
-    target_link_libraries(extra INTERFACE "-framework Foundation" "-framework IOKit" "-framework AppKit" "-framework IOKit")
-  else()
-    find_library(COREFOUNDATION CoreFoundation)
-    find_library(IOKIT IOKit)
-    target_link_libraries(extra INTERFACE ${IOKIT} ${COREFOUNDATION})
-  endif()
-elseif(NOT (MSVC OR DEPENDS OR APPLE OR OPENBSD OR ANDROID))
+  set(EXTRA_LIBRARIES socket nsl resolv)
+elseif(NOT MSVC AND NOT DEPENDS)
   find_library(RT rt)
-  target_link_libraries(extra INTERFACE rt)
+  set(EXTRA_LIBRARIES ${RT})
 endif()
 
-if (WIN32)
-  target_link_libraries(extra INTERFACE setupapi)
-endif()
+list(APPEND EXTRA_LIBRARIES ${CMAKE_DL_LIBS})
 
-add_library(readline INTERFACE)
+if (HIDAPI_FOUND OR LibUSB_COMPILE_TEST_PASSED)
+  if (APPLE)
+    if(DEPENDS)
+      list(APPEND EXTRA_LIBRARIES "-framework Foundation -framework IOKit")
+    else()
+      find_library(COREFOUNDATION CoreFoundation)
+      find_library(IOKIT IOKit)
+      list(APPEND EXTRA_LIBRARIES ${IOKIT})
+      list(APPEND EXTRA_LIBRARIES ${COREFOUNDATION})
+    endif()
+  endif()
+  if (WIN32)
+    list(APPEND EXTRA_LIBRARIES setupapi)
+  endif()
+endif()
 
 if (BUILD_INTEGRATION)
-  target_compile_definitions(extra INTERFACE LOKI_ENABLE_INTEGRATION_TEST_HOOKS)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D BELDEX_ENABLE_INTEGRATION_TEST_HOOKS")
 else()
   option(USE_READLINE "Build with GNU readline support." ON)
-  if(USE_READLINE AND NOT DEPENDS)
+  if(USE_READLINE)
     find_package(Readline)
     if(READLINE_FOUND AND GNU_READLINE_FOUND)
-      target_link_libraries(readline INTERFACE ${GNU_READLINE_LIBRARY} epee_readline)
-      target_include_directories(readline INTERFACE ${Readline_INCLUDE_DIR})
-      target_compile_definitions(readline INTERFACE HAVE_READLINE)
-      message(STATUS "Found readline library at: ${GNU_READLINE_LIBRARY}")
+      add_definitions(-DHAVE_READLINE)
+      include_directories(${Readline_INCLUDE_DIR})
+      message(STATUS "Found readline library at: ${Readline_ROOT_DIR}")
+      set(EPEE_READLINE epee_readline)
     else()
       message(STATUS "Could not find GNU readline library so building without readline support")
     endif()
-  elseif(USE_READLINE AND DEPENDS AND NOT MINGW)
-    find_path(Readline_INCLUDE_PATH readline/readline.h)
-    find_library(Readline_LIBRARY readline)
-    find_library(Terminfo_LIBRARY tinfo)
-    target_link_libraries(readline INTERFACE ${Readline_LIBRARY} ${Terminfo_LIBRARY})
-    target_include_directories(readline INTERFACE ${Readline_INCLUDE_PATH})
-    target_compile_definitions(readline INTERFACE HAVE_READLINE)
   endif()
 endif()
 
 if(ANDROID)
-  target_compile_options(extra INTERFACE "-Wno-error=user-defined-warnings")
+  set(ATOMIC libatomic.a)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=user-defined-warnings")
 endif()
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND ARCH_WIDTH EQUAL "32" AND NOT IOS AND NOT FREEBSD)
   find_library(ATOMIC atomic)
   if (ATOMIC_FOUND)
-    target_link_libraries(extra INTERFACE ${ATOMIC})
+    list(APPEND EXTRA_LIBRARIES ${ATOMIC})
   endif()
 endif()
 
-option(LOKI_DEBUG_SHORT_PROOFS "Developer option to substantially reduce uptime proof intervals for local test network debugging (the result lokid will not be usable on the live networks)" OFF)
-if (LOKI_DEBUG_SHORT_PROOFS)
-  add_definitions(-DUPTIME_PROOF_BASE_MINUTE=3) # 20x faster uptime proofs
-endif()
+find_path(ZMQ_INCLUDE_PATH zmq.hpp)
+find_library(ZMQ_LIB zmq)
+find_library(PGM_LIBRARY pgm)
+find_library(NORM_LIBRARY norm)
+find_library(SODIUM_LIBRARY sodium)
 
-
-add_library(sqlite3 INTERFACE)
-if (NOT SQLITE3_LIBRARIES)
-  pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+if(NOT ZMQ_INCLUDE_PATH)
+  message(FATAL_ERROR "Could not find required header zmq.hpp")
 endif()
-find_library(sqlite3_link_libs NAMES ${SQLITE3_LIBRARIES} PATHS ${SQLITE3_LIBRARY_DIRS})
-message(STATUS "sqlite3: ${SQLITE3_LIBRARIES} ${sqlite3_link_libs}")
-target_link_libraries(sqlite3 INTERFACE ${sqlite3_link_libs})
-target_include_directories(sqlite3 INTERFACE ${SQLITE3_INCLUDE_DIRS})
+if(NOT ZMQ_LIB)
+  message(FATAL_ERROR "Could not find required libzmq")
+endif()
+if(PGM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${PGM_LIBRARY}")
+endif()
+if(NORM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${NORM_LIBRARY}")
+endif()
+if(SODIUM_LIBRARY)
+  set(ZMQ_LIB "${ZMQ_LIB};${SODIUM_LIBRARY}")
+endif()
 
 add_subdirectory(contrib)
 add_subdirectory(src)
@@ -967,3 +1033,6 @@ option(BUILD_GUI_DEPS "Build GUI dependencies." OFF)
 # This is not nice, distribution packagers should not enable this, but depend
 # on libunbound shipped with their distribution instead
 option(INSTALL_VENDORED_LIBUNBOUND "Install libunbound binary built from source vendored with this repo." OFF)
+
+
+CHECK_C_COMPILER_FLAG(-std=c11 HAVE_C11)
